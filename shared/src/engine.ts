@@ -6,6 +6,7 @@ import type {
   GameState,
   Player,
   Rank,
+  VisualEvent,
 } from "./types.js";
 
 const HAND_SIZE = 7;
@@ -69,12 +70,32 @@ function log(state: GameState, text: string): void {
   if (state.log.length > 80) state.log.splice(0, state.log.length - 80);
 }
 
+function beginEvents(state: GameState): void {
+  state.eventSeq += 1;
+  state.events = [];
+}
+
+function emit(state: GameState, event: Omit<VisualEvent, "id">): void {
+  state.events.push({
+    ...event,
+    id: `${state.eventSeq}-${state.events.length}`,
+  });
+}
+
 function endGame(state: GameState, winnerId: string): void {
   state.phase = "over";
   state.winnerId = winnerId;
   state.scores = computeScores(state);
   const winner = playerById(state, winnerId);
   log(state, `${winner.name} went out on a discard. Hand over.`);
+  emit(state, {
+    kind: "goOut",
+    tone: "alert",
+    title: `${winner.name} went out`,
+    detail: "Scores are based on table cards minus leftover hand.",
+    fromId: winnerId,
+    faceUp: false,
+  });
 }
 
 export function startGame(
@@ -107,6 +128,19 @@ export function startGame(
     scores: null,
     log: [{ text: `${seated[0].name} goes first. The snake starts with ${snakeStart.rank}.` }],
     turnNumber: 1,
+    eventSeq: 1,
+    events: [
+      {
+        id: "deal-0",
+        kind: "deal",
+        tone: "info",
+        title: `${seated[0].name} goes first`,
+        detail: `The snake starts with a ${snakeStart.rank}.`,
+        toId: "snake",
+        cards: [snakeStart],
+        faceUp: true,
+      },
+    ],
   };
   return state;
 }
@@ -123,11 +157,24 @@ function playMeld(state: GameState, playerId: string, cardIds: string[]): GameSt
   if (next.melds.some((meld) => meld.rank === rank)) {
     throw new IllegalMoveError("That rank is already on the table. Add to the existing meld.");
   }
+  beginEvents(next);
   next.melds.push({
     rank,
     cards: cards.map((card) => ({ card, playerId })),
   });
   log(next, `${player.name} laid down ${cards.length} ${rank}s.`);
+  emit(next, {
+    kind: "meld",
+    tone: "success",
+    title: `${player.name} laid down ${rank}s`,
+    detail: `${cards.length} of a kind`,
+    fromId: playerId,
+    toId: "melds",
+    rank,
+    count: cards.length,
+    cards,
+    faceUp: true,
+  });
   return next;
 }
 
@@ -149,8 +196,20 @@ function addToMeld(
   if (meld.cards.length + cards.length > 4) {
     throw new IllegalMoveError("A set can only have four cards.");
   }
+  beginEvents(next);
   meld.cards.push(...cards.map((card) => ({ card, playerId })));
   log(next, `${player.name} added ${cards.length} ${meld.rank}(s) to the table.`);
+  emit(next, {
+    kind: "add",
+    tone: "success",
+    title: `${player.name} added to the ${meld.rank}s`,
+    fromId: playerId,
+    toId: "melds",
+    rank: meld.rank,
+    count: cards.length,
+    cards,
+    faceUp: true,
+  });
   return next;
 }
 
@@ -178,6 +237,17 @@ function ask(state: GameState, playerId: string, targetId: string, rank: Rank): 
   next.lastAsk = { targetId, rank };
   const stolen = target.hand.filter((card) => card.rank === rank);
   target.hand = target.hand.filter((card) => card.rank !== rank);
+  beginEvents(next);
+  emit(next, {
+    kind: "ask",
+    tone: "info",
+    title: `${player.name} asked ${target.name}`,
+    detail: `for ${rank}s`,
+    fromId: playerId,
+    toId: targetId,
+    rank,
+    faceUp: false,
+  });
 
   if (stolen.length > 0) {
     player.hand.push(...stolen);
@@ -186,10 +256,32 @@ function ask(state: GameState, playerId: string, targetId: string, rank: Rank): 
       next,
       `${player.name} asked ${target.name} for ${rank}s and got ${stolen.length}. Turn continues.`,
     );
+    emit(next, {
+      kind: "give",
+      tone: "success",
+      title: `${target.name} handed them over`,
+      detail: `${stolen.length} ${rank}${stolen.length === 1 ? "" : "s"}`,
+      fromId: targetId,
+      toId: playerId,
+      rank,
+      count: stolen.length,
+      cards: stolen,
+      faceUp: true,
+    });
     return next;
   }
 
   log(next, `${player.name} asked ${target.name} for ${rank}s. Go fish.`);
+  emit(next, {
+    kind: "goFish",
+    tone: "miss",
+    title: "Go fish",
+    detail: `${target.name} had no ${rank}s`,
+    fromId: "stock",
+    toId: playerId,
+    rank,
+    faceUp: false,
+  });
   refillStock(next);
   const drawn = next.stock.shift();
   if (!drawn) {
@@ -202,12 +294,35 @@ function ask(state: GameState, playerId: string, targetId: string, rank: Rank): 
     player.hand.push(drawn);
     next.phase = "fishing";
     log(next, `${player.name} fished the ${drawn.rank} they asked for. Turn continues.`);
+    emit(next, {
+      kind: "fishHit",
+      tone: "success",
+      title: `${player.name} fished a ${rank}`,
+      detail: "They drew the rank they asked for.",
+      fromId: "stock",
+      toId: playerId,
+      rank,
+      count: 1,
+      cards: [drawn],
+      faceUp: true,
+    });
     return next;
   }
 
   player.hand.push(drawn);
   next.phase = "goFishDiscard";
   log(next, `${player.name} did not fish a ${rank}. Discard to end the turn.`);
+  emit(next, {
+    kind: "fishMiss",
+    tone: "miss",
+    title: `${player.name} did not fish a ${rank}`,
+    fromId: "stock",
+    toId: playerId,
+    rank,
+    count: 1,
+    cards: [drawn],
+    faceUp: false,
+  });
   return next;
 }
 
@@ -227,6 +342,7 @@ function takeSnake(state: GameState, playerId: string, fromIndex: number): GameS
   player.hand.push(...taken);
   next.phase = "fromSnake";
   next.lastAsk = null;
+  beginEvents(next);
   const start = taken[0];
   log(
     next,
@@ -234,6 +350,20 @@ function takeSnake(state: GameState, playerId: string, fromIndex: number): GameS
       ? `${player.name} took the tail (${start.rank}) from the snake.`
       : `${player.name} took ${taken.length} cards from the snake, starting at ${start.rank}.`,
   );
+  emit(next, {
+    kind: "takeSnake",
+    tone: "info",
+    title: `${player.name} took the snake`,
+    detail:
+      taken.length === 1
+        ? `Picked up the tail (${start.rank}).`
+        : `${taken.length} cards, from ${start.rank} through the tail.`,
+    fromId: "snake",
+    toId: playerId,
+    count: taken.length,
+    cards: taken,
+    faceUp: true,
+  });
   return next;
 }
 
@@ -262,7 +392,20 @@ function discard(state: GameState, playerId: string, cardId: string): GameState 
 
   const [card] = takeFromHand(player, [cardId]);
   next.snake.push(card);
+  beginEvents(next);
   log(next, `${player.name} discarded ${card.rank} onto the snake.`);
+  emit(next, {
+    kind: "discard",
+    tone: "info",
+    title: `${player.name} discarded`,
+    detail: `${card.rank} onto the snake`,
+    fromId: playerId,
+    toId: "snake",
+    rank: card.rank,
+    count: 1,
+    cards: [card],
+    faceUp: true,
+  });
 
   if (player.hand.length === 0) {
     endGame(next, player.id);
@@ -272,6 +415,13 @@ function discard(state: GameState, playerId: string, cardId: string): GameState 
   advanceTurn(next);
   const current = playerById(next, next.currentPlayerId);
   log(next, `${current.name}'s turn.`);
+  emit(next, {
+    kind: "turn",
+    tone: "info",
+    title: `${current.name}'s turn`,
+    fromId: current.id,
+    faceUp: false,
+  });
   return next;
 }
 
@@ -313,5 +463,16 @@ export function toPublicState(state: GameState, youId: string) {
     scores: state.scores,
     log: state.log,
     turnNumber: state.turnNumber,
+    eventSeq: state.eventSeq,
+    events: state.events.map((event) => redactEvent(event, youId)),
   };
+}
+
+function redactEvent(event: VisualEvent, youId: string): VisualEvent {
+  const involved = event.fromId === youId || event.toId === youId;
+  if (event.kind === "give" && !involved) {
+    return { ...event, cards: undefined, faceUp: false };
+  }
+  if (event.faceUp || involved) return event;
+  return { ...event, cards: undefined };
 }

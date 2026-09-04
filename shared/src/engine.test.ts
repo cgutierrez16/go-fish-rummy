@@ -43,6 +43,7 @@ describe("Go Fish Rummy engine", () => {
     expect(next.players[1].hand).toHaveLength(1);
     expect(next.phase).toBe("fishing");
     expect(next.currentPlayerId).toBe("p1");
+    expect(next.events.some((event) => event.kind === "give")).toBe(true);
   });
 
   it("blocks discard during an ask streak unless it goes out", () => {

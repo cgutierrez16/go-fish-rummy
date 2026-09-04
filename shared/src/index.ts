@@ -1,4 +1,13 @@
-export type { Card, ClientAction, GameState, PublicGameState, Rank, RoomInfo, Suit } from "./types.js";
+export type {
+  Card,
+  ClientAction,
+  GameState,
+  PublicGameState,
+  Rank,
+  RoomInfo,
+  Suit,
+  VisualEvent,
+} from "./types.js";
 export { RANKS, SUITS } from "./types.js";
 export { cardPoints, createDeck, rankLabel, shuffle } from "./cards.js";
 export { computeScores } from "./scoring.js";

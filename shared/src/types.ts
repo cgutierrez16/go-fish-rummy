@@ -52,6 +52,36 @@ export interface GameLogEntry {
   text: string;
 }
 
+export type VisualKind =
+  | "deal"
+  | "ask"
+  | "give"
+  | "goFish"
+  | "fishHit"
+  | "fishMiss"
+  | "discard"
+  | "takeSnake"
+  | "meld"
+  | "add"
+  | "turn"
+  | "goOut";
+
+export type VisualTone = "info" | "success" | "miss" | "alert";
+
+export interface VisualEvent {
+  id: string;
+  kind: VisualKind;
+  tone: VisualTone;
+  title: string;
+  detail?: string;
+  fromId?: string;
+  toId?: string;
+  rank?: Rank;
+  count?: number;
+  cards?: Card[];
+  faceUp: boolean;
+}
+
 export interface GameState {
   players: Player[];
   stock: Card[];
@@ -64,6 +94,8 @@ export interface GameState {
   scores: Record<string, number> | null;
   log: GameLogEntry[];
   turnNumber: number;
+  eventSeq: number;
+  events: VisualEvent[];
 }
 
 export type PublicPlayer = Omit<Player, "hand"> & { handCount: number };
@@ -82,6 +114,8 @@ export interface PublicGameState {
   scores: Record<string, number> | null;
   log: GameLogEntry[];
   turnNumber: number;
+  eventSeq: number;
+  events: VisualEvent[];
 }
 
 export type ClientAction =

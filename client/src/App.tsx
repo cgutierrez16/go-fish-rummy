@@ -6,9 +6,13 @@ import {
   type PublicGameState,
   type Rank,
   type RoomInfo,
+  type VisualEvent,
 } from "@gfr/shared";
 import { CardView } from "./CardView";
+import { FlightLayer } from "./FlightLayer";
+import { opponentSeats } from "./seating";
 import { connect } from "./socket";
+import { Banner, Hand, Seat } from "./tableBits";
 
 const SESSION_KEY = "gfr-session";
 
@@ -36,9 +40,9 @@ function phaseHint(state: PublicGameState, youId: string): string {
   if (!yours) return "Waiting for the current player.";
   if (state.phase === "choose") {
     if (state.yourHand.length === 0) {
-      return "Empty hand: take from the snake, or ask only for an open meld (three of a rank on the table).";
+      return "Empty hand: take from the snake, or ask only for an open meld.";
     }
-    return "Meld if you want, then ask someone for a rank, or take cards from the snake.";
+    return "Meld if you want, then ask someone (click a seat) or take from the snake.";
   }
   if (state.phase === "fishing") {
     return "Keep asking, lay down sets, or discard your last card to go out.";
@@ -47,6 +51,28 @@ function phaseHint(state: PublicGameState, youId: string): string {
     return "You took the snake. Meld if you can, then discard. You cannot ask this turn.";
   }
   return "Go fish missed. Discard a card to end your turn.";
+}
+
+function headline(events: VisualEvent[]): VisualEvent | null {
+  const order = [
+    "goOut",
+    "give",
+    "fishHit",
+    "fishMiss",
+    "takeSnake",
+    "meld",
+    "add",
+    "discard",
+    "goFish",
+    "ask",
+    "turn",
+    "deal",
+  ];
+  for (const kind of order) {
+    const found = [...events].reverse().find((event) => event.kind === kind);
+    if (found) return found;
+  }
+  return events.at(-1) ?? null;
 }
 
 export default function App() {
@@ -175,10 +201,7 @@ export default function App() {
               placeholder="Room code"
               maxLength={5}
             />
-            <button
-              type="button"
-              onClick={() => send("joinRoom", { name, code: joinCode })}
-            >
+            <button type="button" onClick={() => send("joinRoom", { name, code: joinCode })}>
               Join
             </button>
           </div>
@@ -188,7 +211,7 @@ export default function App() {
     );
   }
 
-  if (!state) {
+  if (!state || !youId) {
     return (
       <main className="shell">
         <header className="room-head">
@@ -222,8 +245,15 @@ export default function App() {
     );
   }
 
+  const you = state.players.find((player) => player.id === youId);
+  if (!you) return null;
+
+  const seats = opponentSeats(state.players, youId);
   const currentName =
     state.players.find((player) => player.id === state.currentPlayerId)?.name ?? "Someone";
+  const notice = headline(state.events);
+  const canAsk = canAct && (state.phase === "choose" || state.phase === "fishing");
+  const playerCount = state.players.length;
 
   return (
     <main className="table">
@@ -239,36 +269,73 @@ export default function App() {
         )}
       </header>
 
-      <section className="opponents">
-        {state.players
-          .filter((player) => player.id !== youId)
-          .map((player) => (
-            <button
-              key={player.id}
-              type="button"
-              className={`seat ${askTarget === player.id ? "picked" : ""} ${state.currentPlayerId === player.id ? "active" : ""}`}
-              onClick={() => setAskTarget(player.id)}
-            >
-              <strong>{player.name}</strong>
-              <span>{player.handCount} cards</span>
-              {!player.connected && <em>offline</em>}
-            </button>
-          ))}
-      </section>
+      <div className={`playfield p${playerCount}`}>
+        {seats.north && (
+          <Seat
+            player={seats.north}
+            slot="north"
+            active={state.currentPlayerId === seats.north.id}
+            picked={askTarget === seats.north.id}
+            onPick={() => setAskTarget(seats.north!.id)}
+          />
+        )}
+        {seats.west && (
+          <Seat
+            player={seats.west}
+            slot="west"
+            active={state.currentPlayerId === seats.west.id}
+            picked={askTarget === seats.west.id}
+            onPick={() => setAskTarget(seats.west!.id)}
+          />
+        )}
 
-      <section className="felt">
-        <div>
-          <h2>Melds</h2>
-          <div className="melds">
+        <section className="felt-center">
+          <Banner event={notice} />
+          <div className="center-piles">
+            <div className="stock-pile" data-anchor="stock">
+              <div className="card md back">
+                <span className="back-mark">GFR</span>
+              </div>
+              <span>Stock {state.stockCount}</span>
+            </div>
+            <div className="snake-wrap" data-anchor="snake">
+              <h2>Snake</h2>
+              <p className="muted">Click a card to take it through the tail.</p>
+              <div className="snake">
+                {state.snake.length === 0 && <p className="muted">Empty</p>}
+                {state.snake.map((card, index) => (
+                  <div
+                    key={card.id}
+                    className="snake-slot"
+                    style={{ ["--i" as string]: index, ["--mid" as string]: (state.snake.length - 1) / 2 }}
+                  >
+                    {index === 0 && <span>head</span>}
+                    {index === state.snake.length - 1 && index !== 0 && <span>tail</span>}
+                    {state.snake.length === 1 && <span>head · tail</span>}
+                    <CardView
+                      card={card}
+                      size="md"
+                      onClick={
+                        canAct && state.phase === "choose"
+                          ? () => act({ type: "takeSnake", fromIndex: index })
+                          : undefined
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="melds" data-anchor="melds">
             {state.melds.length === 0 && <p className="muted">No sets on the table yet.</p>}
             {state.melds.map((meld, index) => (
               <div key={meld.rank} className="meld">
                 <span>
                   {meld.rank}s {meld.cards.length === 3 ? "· open" : "· complete"}
                 </span>
-                <div className="row">
+                <div className="meld-row">
                   {meld.cards.map((played) => (
-                    <CardView key={played.card.id} card={played.card} />
+                    <CardView key={played.card.id} card={played.card} size="sm" />
                   ))}
                 </div>
                 {canAct && selected.length > 0 && (
@@ -282,102 +349,93 @@ export default function App() {
               </div>
             ))}
           </div>
-        </div>
-
-        <div>
-          <h2>Snake</h2>
-          <p className="muted">Head is oldest. Click a card to take it and everything through the tail.</p>
-          <div className="snake">
-            {state.snake.length === 0 && <p className="muted">Empty — the next discard starts a new head.</p>}
-            {state.snake.map((card, index) => (
-              <div key={card.id} className="snake-slot">
-                {index === 0 && <span>head</span>}
-                {index === state.snake.length - 1 && <span>tail</span>}
-                <CardView
-                  card={card}
-                  stacked
-                  onClick={
-                    canAct && state.phase === "choose"
-                      ? () => act({ type: "takeSnake", fromIndex: index })
-                      : undefined
-                  }
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="hand-dock">
-        <p className="hint">{phaseHint(state, youId ?? "")}</p>
-        {state.phase === "over" && state.scores && (
-          <ul className="scores">
-            {state.players.map((player) => (
-              <li key={player.id}>
-                {player.name}: {state.scores?.[player.id]}
-                {state.winnerId === player.id ? " · went out" : ""}
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="row hand">
-          {state.yourHand.map((card) => (
-            <CardView
-              key={card.id}
-              card={card}
-              selected={selected.includes(card.id)}
-              onClick={() => toggleCard(card.id)}
-            />
-          ))}
-          {state.yourHand.length === 0 && <p className="muted">Your hand is empty. You are still in until you go out on a discard.</p>}
-        </div>
-        <div className="actions">
-          <button type="button" disabled={!canAct || selected.length < 1} onClick={tryMeld}>
-            Lay down / add
-          </button>
-          <button
-            type="button"
-            disabled={!canAct || selected.length !== 1 || !["fromSnake", "goFishDiscard", "fishing"].includes(state.phase)}
-            onClick={() => act({ type: "discard", cardId: selected[0] })}
-          >
-            Discard selected
-          </button>
-        </div>
-        {(state.phase === "choose" || state.phase === "fishing") && canAct && (
-          <div className="ask">
-            <p>Ask for a rank {askTarget ? `from ${state.players.find((p) => p.id === askTarget)?.name}` : "(pick a player above)"}</p>
-            <div className="ranks">
-              {askableRanks.map((rank) => (
-                <button
-                  key={rank}
-                  type="button"
-                  className={askRank === rank ? "picked" : ""}
-                  onClick={() => setAskRank(rank)}
-                >
-                  {rank}
-                </button>
+          <aside className="activity">
+            <h2>Play-by-play</h2>
+            <ul>
+              {[...state.log].slice(-7).reverse().map((entry, index) => (
+                <li key={`${entry.text}-${index}`}>{entry.text}</li>
               ))}
-            </div>
+            </ul>
+          </aside>
+        </section>
+
+        {seats.east && (
+          <Seat
+            player={seats.east}
+            slot="east"
+            active={state.currentPlayerId === seats.east.id}
+            picked={askTarget === seats.east.id}
+            onPick={() => setAskTarget(seats.east!.id)}
+          />
+        )}
+
+        <section className="south-dock">
+          <p className="hint">{phaseHint(state, youId)}</p>
+          {state.phase === "over" && state.scores && (
+            <ul className="scores">
+              {state.players.map((player) => (
+                <li key={player.id}>
+                  {player.name}: {state.scores?.[player.id]}
+                  {state.winnerId === player.id ? " · went out" : ""}
+                </li>
+              ))}
+            </ul>
+          )}
+          <Seat player={you} slot="south" you active={state.currentPlayerId === you.id}>
+            <Hand cards={state.yourHand} selected={selected} onToggle={toggleCard} />
+          </Seat>
+          <div className="actions">
+            <button type="button" disabled={!canAct || selected.length < 1} onClick={tryMeld}>
+              Lay down / add
+            </button>
             <button
-              className="primary"
               type="button"
-              disabled={!askTarget || !askRank}
-              onClick={() => {
-                if (!askTarget || !askRank) return;
-                act({ type: "ask", targetId: askTarget, rank: askRank });
-              }}
+              disabled={
+                !canAct ||
+                selected.length !== 1 ||
+                !["fromSnake", "goFishDiscard", "fishing"].includes(state.phase)
+              }
+              onClick={() => act({ type: "discard", cardId: selected[0] })}
             >
-              Ask
+              Discard selected
             </button>
           </div>
-        )}
-        {error && <p className="error">{error}</p>}
-        <ul className="log">
-          {[...state.log].slice(-8).reverse().map((entry, index) => (
-            <li key={`${entry.text}-${index}`}>{entry.text}</li>
-          ))}
-        </ul>
-      </section>
+          {canAsk && (
+            <div className="ask">
+              <p>
+                {askTarget
+                  ? `Ask ${state.players.find((player) => player.id === askTarget)?.name} for`
+                  : "Click a player around the table, then a rank"}
+              </p>
+              <div className="ranks">
+                {askableRanks.map((rank) => (
+                  <button
+                    key={rank}
+                    type="button"
+                    className={askRank === rank ? "picked" : ""}
+                    onClick={() => setAskRank(rank)}
+                  >
+                    {rank}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="primary"
+                type="button"
+                disabled={!askTarget || !askRank}
+                onClick={() => {
+                  if (!askTarget || !askRank) return;
+                  act({ type: "ask", targetId: askTarget, rank: askRank });
+                }}
+              >
+                Ask
+              </button>
+            </div>
+          )}
+          {error && <p className="error">{error}</p>}
+        </section>
+      </div>
+      <FlightLayer events={state.events} eventSeq={state.eventSeq} />
     </main>
   );
 }
