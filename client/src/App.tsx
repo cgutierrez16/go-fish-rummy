@@ -86,6 +86,8 @@ export default function App() {
   const [selected, setSelected] = useState<string[]>([]);
   const [askRank, setAskRank] = useState<Rank | null>(null);
   const [askTarget, setAskTarget] = useState<string | null>(null);
+  const [showLog, setShowLog] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   useEffect(() => {
     const next = connect();
@@ -257,17 +259,45 @@ export default function App() {
 
   return (
     <main className="table">
-      <header className="table-bar">
-        <strong>Room {room.code}</strong>
-        <span>
-          {state.phase === "over" ? "Hand over" : `${currentName}'s turn`} · Stock {state.stockCount}
-        </span>
-        {state.phase === "over" && isHost && (
-          <button type="button" onClick={() => send("startGame")}>
-            Deal again
+      <header className="chrome">
+        <strong className="room-label">ROOM {room.code}</strong>
+        <div className="chrome-right">
+          <span className="turn-line">
+            {state.phase === "over" ? (
+              "Hand over"
+            ) : (
+              <>
+                <em>{currentName}'s turn</em>
+                <span> · Stock {state.stockCount}</span>
+              </>
+            )}
+          </span>
+          {state.phase === "over" && isHost && (
+            <button type="button" className="ghost" onClick={() => send("startGame")}>
+              Deal again
+            </button>
+          )}
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Play-by-play"
+            onClick={() => setShowLog((open) => !open)}
+          >
+            <LogIcon />
           </button>
-        )}
+        </div>
       </header>
+
+      {showLog && (
+        <aside className="log-drawer">
+          <h2>Play-by-play</h2>
+          <ul>
+            {[...state.log].slice(-12).reverse().map((entry, index) => (
+              <li key={`${entry.text}-${index}`}>{entry.text}</li>
+            ))}
+          </ul>
+        </aside>
+      )}
 
       <div className={`playfield p${playerCount}`}>
         {seats.north && (
@@ -294,24 +324,17 @@ export default function App() {
           <div className="center-piles">
             <div className="stock-pile" data-anchor="stock">
               <div className="card md back">
+                <span className="back-frame" />
                 <span className="back-mark">GFR</span>
               </div>
-              <span>Stock {state.stockCount}</span>
+              <span className="pile-label">Stock</span>
             </div>
             <div className="snake-wrap" data-anchor="snake">
-              <h2>Snake</h2>
-              <p className="muted">Click a card to take it through the tail.</p>
+              <span className="pile-label">Snake</span>
               <div className="snake">
                 {state.snake.length === 0 && <p className="muted">Empty</p>}
                 {state.snake.map((card, index) => (
-                  <div
-                    key={card.id}
-                    className="snake-slot"
-                    style={{ ["--i" as string]: index, ["--mid" as string]: (state.snake.length - 1) / 2 }}
-                  >
-                    {index === 0 && <span>head</span>}
-                    {index === state.snake.length - 1 && index !== 0 && <span>tail</span>}
-                    {state.snake.length === 1 && <span>head · tail</span>}
+                  <div key={card.id} className="snake-slot">
                     <CardView
                       card={card}
                       size="md"
@@ -327,36 +350,23 @@ export default function App() {
             </div>
           </div>
           <div className="melds" data-anchor="melds">
-            {state.melds.length === 0 && <p className="muted">No sets on the table yet.</p>}
             {state.melds.map((meld, index) => (
-              <div key={meld.rank} className="meld">
-                <span>
-                  {meld.rank}s {meld.cards.length === 3 ? "· open" : "· complete"}
-                </span>
+              <button
+                key={meld.rank}
+                type="button"
+                className="meld"
+                disabled={!canAct || selected.length === 0}
+                onClick={() => act({ type: "addToMeld", meldIndex: index, cardIds: selected })}
+              >
+                <span className="meld-label">{meld.rank}s</span>
                 <div className="meld-row">
                   {meld.cards.map((played) => (
                     <CardView key={played.card.id} card={played.card} size="sm" />
                   ))}
                 </div>
-                {canAct && selected.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => act({ type: "addToMeld", meldIndex: index, cardIds: selected })}
-                  >
-                    Add selected
-                  </button>
-                )}
-              </div>
+              </button>
             ))}
           </div>
-          <aside className="activity">
-            <h2>Play-by-play</h2>
-            <ul>
-              {[...state.log].slice(-7).reverse().map((entry, index) => (
-                <li key={`${entry.text}-${index}`}>{entry.text}</li>
-              ))}
-            </ul>
-          </aside>
         </section>
 
         {seats.east && (
@@ -370,7 +380,6 @@ export default function App() {
         )}
 
         <section className="south-dock">
-          <p className="hint">{phaseHint(state, youId)}</p>
           {state.phase === "over" && state.scores && (
             <ul className="scores">
               {state.players.map((player) => (
@@ -385,11 +394,12 @@ export default function App() {
             <Hand cards={state.yourHand} selected={selected} onToggle={toggleCard} />
           </Seat>
           <div className="actions">
-            <button type="button" disabled={!canAct || selected.length < 1} onClick={tryMeld}>
-              Lay down / add
+            <button type="button" className="table-btn" disabled={!canAct || selected.length < 1} onClick={tryMeld}>
+              Lay down
             </button>
             <button
               type="button"
+              className="table-btn"
               disabled={
                 !canAct ||
                 selected.length !== 1 ||
@@ -397,15 +407,15 @@ export default function App() {
               }
               onClick={() => act({ type: "discard", cardId: selected[0] })}
             >
-              Discard selected
+              Discard
             </button>
           </div>
           {canAsk && (
             <div className="ask">
               <p>
                 {askTarget
-                  ? `Ask ${state.players.find((player) => player.id === askTarget)?.name} for`
-                  : "Click a player around the table, then a rank"}
+                  ? `Ask ${state.players.find((player) => player.id === askTarget)?.name}`
+                  : "Click a player, then a rank"}
               </p>
               <div className="ranks">
                 {askableRanks.map((rank) => (
@@ -420,7 +430,7 @@ export default function App() {
                 ))}
               </div>
               <button
-                className="primary"
+                className="table-btn ask-go"
                 type="button"
                 disabled={!askTarget || !askRank}
                 onClick={() => {
@@ -435,7 +445,25 @@ export default function App() {
           {error && <p className="error">{error}</p>}
         </section>
       </div>
+
+      <button type="button" className="help-btn" aria-label="Help" onClick={() => setShowHelp((open) => !open)}>
+        ?
+      </button>
+      {showHelp && (
+        <div className="help-card">
+          <p>{phaseHint(state, youId)}</p>
+          <p>Click an opponent to ask. Click a snake card to take it through the tail.</p>
+        </div>
+      )}
       <FlightLayer events={state.events} eventSeq={state.eventSeq} />
     </main>
+  );
+}
+
+function LogIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M3 4h10M3 8h10M3 12h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
   );
 }

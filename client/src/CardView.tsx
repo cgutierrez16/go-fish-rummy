@@ -1,6 +1,6 @@
 import type { Card as CardType } from "@gfr/shared";
 
-const SUIT_MARK: Record<CardType["suit"], string> = {
+export const SUIT_MARK: Record<CardType["suit"], string> = {
   hearts: "♥",
   diamonds: "♦",
   clubs: "♣",
@@ -41,7 +41,14 @@ export function CardView({
 }
 
 function CardFace({ card, face }: { card?: CardType; face: "up" | "down" }) {
-  if (face === "down" || !card) return <span className="back-mark">GFR</span>;
+  if (face === "down" || !card) {
+    return (
+      <>
+        <span className="back-frame" />
+        <span className="back-mark">GFR</span>
+      </>
+    );
+  }
   return (
     <>
       <span className="corner top">
@@ -57,12 +64,24 @@ function CardFace({ card, face }: { card?: CardType; face: "up" | "down" }) {
   );
 }
 
-export function CardFan({ count, vertical = false }: { count: number; vertical?: boolean }) {
-  const shown = Math.min(Math.max(count, 0), 10);
+export function CardFan({
+  count,
+  slot,
+}: {
+  count: number;
+  slot: "north" | "west" | "east";
+}) {
+  const shown = Math.min(Math.max(count, 0), 8);
+  const mid = shown <= 1 ? 0 : (shown - 1) / 2;
   return (
-    <div className={`card-fan ${vertical ? "vertical" : ""}`} aria-hidden="true">
+    <div className={`card-fan ${slot}`} aria-hidden="true">
       {Array.from({ length: shown }, (_, index) => (
-        <div key={index} className="card sm back fan-card" style={{ ["--i" as string]: index }}>
+        <div
+          key={index}
+          className="card sm back fan-card"
+          style={{ ["--i" as string]: index, ["--mid" as string]: mid }}
+        >
+          <span className="back-frame" />
           <span className="back-mark">GFR</span>
         </div>
       ))}
